@@ -1,4 +1,4 @@
-// hooks/useNearbyStores.js - Fixed version
+// src/hooks/useNearbyStores.js
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -82,6 +82,103 @@ const MOCK_STORES = [
   }
 ];
 
+// Cache store data in localStorage
+const cacheStoreData = (locationKey, storeData) => {
+  try {
+    // Create a location-based cache key
+    const cacheKey = `kirova_stores_${locationKey}`;
+    
+    // Store the data with timestamp
+    const cacheData = {
+      stores: storeData,
+      timestamp: new Date().toISOString(),
+      version: '1.0' // For cache invalidation if needed
+    };
+    
+    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    console.log(`Cached store data for location: ${locationKey}`);
+  } catch (error) {
+    console.error("Error caching store data:", error);
+  }
+};
+
+// Get cached store data from localStorage
+const getCachedStoreData = (locationKey) => {
+  try {
+    const cacheKey = `kirova_stores_${locationKey}`;
+    const cachedData = localStorage.getItem(cacheKey);
+    
+    if (!cachedData) return null;
+    
+    const data = JSON.parse(cachedData);
+    
+    // Check if cache is fresh (less than 24 hours old)
+    const timestamp = new Date(data.timestamp);
+    const now = new Date();
+    const cacheAge = now - timestamp;
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    
+    if (cacheAge > maxAge) {
+      // Cache is stale, remove it
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    
+    return data.stores;
+  } catch (error) {
+    console.error("Error retrieving cached store data:", error);
+    return null;
+  }
+};
+
+// Cache geocoding results
+const cacheGeocodingResult = (query, result) => {
+  try {
+    const geocodingCache = JSON.parse(localStorage.getItem('kirova_geocoding_cache') || '{}');
+    geocodingCache[query] = {
+      result,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Limit cache size to prevent localStorage from getting too big
+    const cacheKeys = Object.keys(geocodingCache);
+    if (cacheKeys.length > 50) {
+      // Remove oldest entries
+      const sortedKeys = cacheKeys.sort((a, b) => 
+        new Date(geocodingCache[a].timestamp) - new Date(geocodingCache[b].timestamp)
+      );
+      const keysToRemove = sortedKeys.slice(0, cacheKeys.length - 50);
+      keysToRemove.forEach(key => delete geocodingCache[key]);
+    }
+    
+    localStorage.setItem('kirova_geocoding_cache', JSON.stringify(geocodingCache));
+  } catch (error) {
+    console.error("Error caching geocoding result:", error);
+  }
+};
+
+// Get cached geocoding result
+const getCachedGeocodingResult = (query) => {
+  try {
+    const geocodingCache = JSON.parse(localStorage.getItem('kirova_geocoding_cache') || '{}');
+    const cachedResult = geocodingCache[query];
+    
+    if (!cachedResult) return null;
+    
+    // Check if cache is fresh (less than 7 days old)
+    const timestamp = new Date(cachedResult.timestamp);
+    const now = new Date();
+    const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+    
+    if (now - timestamp > maxAge) return null;
+    
+    return cachedResult.result;
+  } catch (error) {
+    console.error("Error retrieving cached geocoding result:", error);
+    return null;
+  }
+};
+
 // Map the store type based on the store name or tags
 const getStoreType = (name, tags) => {
   if (!name) return 'Grocery';
@@ -158,27 +255,46 @@ const generateOffer = (name) => {
   return null;
 };
 
-// List of streets in McKinney for fallback address generation
-const MCKINNEY_STREETS = [
-  "Custer Rd", "Eldorado Pkwy", "Virginia Pkwy", "Stacy Rd", "Ridge Rd",
-  "Lake Forest Dr", "Hardin Blvd", "University Dr", "McDonald St", "Highway 121",
-  "SH 121", "US 75", "Alma Rd", "Wilmeth Rd", "McKinney Ranch Pkwy"
-];
+// List of streets for fallback address generation - use current city/state when possible
+const getStreets = (city = null) => {
+  // New York streets
+  if (city && city.toLowerCase().includes('new york')) {
+    return [
+      "Broadway", "5th Avenue", "Park Avenue", "Madison Avenue", "Lexington Avenue",
+      "3rd Avenue", "2nd Avenue", "1st Avenue", "Amsterdam Avenue", "W 42nd Street",
+      "W 34th Street", "Canal Street", "Houston Street", "Bleecker Street", "Christopher Street"
+    ];
+  }
+  
+  // Generic streets if no match
+  return [
+    "Main St", "Oak St", "Pine St", "Maple Ave", "Washington St",
+    "Franklin St", "Highland Ave", "Park Place", "2nd Street", "Jefferson Ave"
+  ];
+};
 
 // Generate realistic address for stores missing address information
 const generateFallbackAddress = (lat, lon, city = "McKinney", state = "TX", zip = "75070") => {
+  const streets = getStreets(city);
   const streetNumber = Math.floor(Math.random() * 9000) + 1000;
-  const street = MCKINNEY_STREETS[Math.floor(Math.random() * MCKINNEY_STREETS.length)];
+  const street = streets[Math.floor(Math.random() * streets.length)];
   return `${streetNumber} ${street}, ${city}, ${state} ${zip}`;
 };
 
 // Ensure store object has all required fields with valid values (no undefined)
-const sanitizeStoreData = (store) => {
+const sanitizeStoreData = (store, city = null, state = null) => {
+  // Use provided city/state from location if available
+  const storeCity = city || store.city || "McKinney";
+  const storeState = state || store.state || "TX";
+  const storeZip = store.zip || "75070";
+  
   return {
     // Required fields with fallbacks
     id: store.id || `store-${Math.random().toString(36).substring(2, 9)}`,
     name: store.name || "Local Grocery Store",
-    address: store.address || "McKinney, TX",
+    address: store.address || generateFallbackAddress(store.lat, store.lon, storeCity, storeState, storeZip),
+    city: storeCity,
+    state: storeState,
     lat: typeof store.lat === 'number' ? store.lat : 33.1972,
     lon: typeof store.lon === 'number' ? store.lon : -96.6397,
     distance: typeof store.distance === 'number' ? store.distance : 0,
@@ -196,6 +312,34 @@ const sanitizeStoreData = (store) => {
   };
 };
 
+// Should we fetch new data based on location changes or login?
+const shouldRefreshStores = () => {
+  // Check for location change flag
+  const locationChanged = localStorage.getItem('kirova_location_changed');
+  if (locationChanged === 'true') {
+    localStorage.removeItem('kirova_location_changed');
+    return true;
+  }
+  
+  // Check if user just logged in
+  const justLoggedIn = sessionStorage.getItem('kirova_just_logged_in');
+  if (justLoggedIn === 'true') {
+    sessionStorage.removeItem('kirova_just_logged_in');
+    return true;
+  }
+  
+  // Check last fetch time
+  const lastFetch = localStorage.getItem('kirova_last_store_fetch');
+  if (!lastFetch) return true;
+  
+  // If it's been more than 24 hours since last fetch, refresh
+  const lastFetchDate = new Date(lastFetch);
+  const now = new Date();
+  const hoursSinceLastFetch = (now - lastFetchDate) / (1000 * 60 * 60);
+  
+  return hoursSinceLastFetch > 24;
+};
+
 const useNearbyStores = (locationParams) => {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -203,49 +347,68 @@ const useNearbyStores = (locationParams) => {
   
   useEffect(() => {
     const fetchStores = async () => {
-      // Check if we have location parameters
-      if (!locationParams) {
-        setStores(MOCK_STORES.map(store => sanitizeStoreData(store)));
-        setLoading(false);
-        return;
-      }
-      
-      // Extract location data
-      let { zip, lat, lon, latitude, longitude, city, state } = 
-        typeof locationParams === 'string' 
-          ? { zip: locationParams } // If just a zip code was passed
-          : locationParams;        // Otherwise use the full object
-      
-      // If we don't have any location data, use mock data
-      if (!zip && !lat && !lon && !latitude && !longitude) {
-        setStores(MOCK_STORES.map(store => sanitizeStoreData(store)));
-        setLoading(false);
-        return;
-      }
-      
       setLoading(true);
       
-      try {
-        // Use the coordinates if available, otherwise geocode the zip
-        let userLat, userLon, userCity, userState, userZip;
+      // Check localStorage for most recent location
+      const storedCity = localStorage.getItem('userCity');
+      const storedState = localStorage.getItem('userState');
+      const storedZip = localStorage.getItem('userZip');
+      
+      // Create a location key for cache lookup
+      const locationKey = storedCity && storedState 
+        ? `${storedCity.toLowerCase()}_${storedState.toLowerCase()}`
+        : storedZip || 'default';
+      
+      // Check if we should use cached data (if available)
+      const shouldRefresh = shouldRefreshStores();
+      
+      if (!shouldRefresh) {
+        // Try to use cached data first
+        const cachedStores = getCachedStoreData(locationKey);
         
-        if (latitude && longitude) {
-          userLat = latitude;
-          userLon = longitude;
-          userCity = city || 'McKinney';
-          userState = state || 'TX';
-          userZip = zip || '75070';
-        } else if (lat && lon) {
-          userLat = lat;
-          userLon = lon;
-          userCity = city || 'McKinney';
-          userState = state || 'TX';
-          userZip = zip || '75070';
-        } else if (zip) {
-          // Geocode the ZIP code to get coordinates using Nominatim
-          try {
+        if (cachedStores) {
+          console.log("Using cached store data for:", locationKey);
+          setStores(cachedStores);
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // If we get here, we need to fetch fresh data
+      console.log("Fetching fresh store data for:", locationKey);
+      
+      // Track fetch time
+      localStorage.setItem('kirova_last_store_fetch', new Date().toISOString());
+      
+      // Check if we have location parameters
+      if (!locationParams && !storedCity) {
+        setStores(MOCK_STORES.map(store => sanitizeStoreData(store)));
+        setLoading(false);
+        return;
+      }
+      
+      // Determine location coordinates
+      let userLat, userLon, userCity, userState, userZip;
+      
+      // Use stored location first if available
+      if (storedCity && storedState) {
+        try {
+          // Check for cached geocoding results first
+          const geocodeQuery = `${storedCity},${storedState}`;
+          const cachedGeocodingResult = getCachedGeocodingResult(geocodeQuery);
+          
+          if (cachedGeocodingResult) {
+            console.log("Using cached geocoding for:", geocodeQuery);
+            userLat = cachedGeocodingResult.lat;
+            userLon = cachedGeocodingResult.lon;
+            userCity = storedCity;
+            userState = storedState;
+            userZip = storedZip || '';
+          } else {
+            // Geocode the stored city/state
+            console.log("Geocoding:", geocodeQuery);
             const geocodeResponse = await axios.get(
-              `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=USA&format=json&limit=1`,
+              `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(storedCity)}&state=${encodeURIComponent(storedState)}&country=USA&format=json&limit=1`,
               { headers: { 
                 'Accept-Language': 'en-US,en',
                 'User-Agent': 'Kirova-GroceryApp/1.0'
@@ -253,196 +416,304 @@ const useNearbyStores = (locationParams) => {
             );
             
             if (geocodeResponse.data && geocodeResponse.data.length > 0) {
+              console.log(`Successfully geocoded: ${storedCity}, ${storedState}`);
               userLat = parseFloat(geocodeResponse.data[0].lat);
               userLon = parseFloat(geocodeResponse.data[0].lon);
-              userCity = geocodeResponse.data[0].address?.city || 
-                        geocodeResponse.data[0].address?.town || 
-                        geocodeResponse.data[0].address?.village || 
-                        'McKinney';
-              userState = geocodeResponse.data[0].address?.state || 'TX';
-              userZip = zip;
+              userCity = storedCity;
+              userState = storedState;
+              userZip = storedZip || '';
+              
+              // Cache the geocoding result
+              cacheGeocodingResult(geocodeQuery, { lat: userLat, lon: userLon });
             } else {
-              throw new Error('Could not geocode ZIP code');
+              throw new Error('Could not geocode stored location');
             }
-          } catch (geocodeError) {
-            console.error('Error geocoding ZIP:', geocodeError);
-            // Fall back to McKinney coordinates
-            userLat = 33.1972;
-            userLon = -96.6397;
-            userCity = 'McKinney';
-            userState = 'TX';
-            userZip = '75070';
+          }
+        } catch (geocodeError) {
+          console.error('Error geocoding stored location:', geocodeError);
+          // Fallback to location params
+        }
+      }
+      
+      // If we couldn't use stored location, extract from location params
+      if (!userLat && locationParams) {
+        let { zip, lat, lon, latitude, longitude, city, state } = 
+          typeof locationParams === 'string' 
+            ? { zip: locationParams } // If just a zip code was passed
+            : locationParams;        // Otherwise use the full object
+        
+        // If we have coordinates, use them
+        if (latitude && longitude) {
+          userLat = latitude;
+          userLon = longitude;
+          userCity = city || storedCity || 'McKinney';
+          userState = state || storedState || 'TX';
+          userZip = zip || storedZip || '75070';
+        } else if (lat && lon) {
+          userLat = lat;
+          userLon = lon;
+          userCity = city || storedCity || 'McKinney';
+          userState = state || storedState || 'TX';
+          userZip = zip || storedZip || '75070';
+        } else if (zip) {
+          // Check for cached zip geocoding
+          const zipQuery = `zip_${zip}`;
+          const cachedZipGeocoding = getCachedGeocodingResult(zipQuery);
+          
+          if (cachedZipGeocoding) {
+            userLat = cachedZipGeocoding.lat;
+            userLon = cachedZipGeocoding.lon;
+            userCity = cachedZipGeocoding.city || storedCity || 'McKinney';
+            userState = cachedZipGeocoding.state || storedState || 'TX';
+            userZip = zip;
+          } else {
+            // Geocode the ZIP code
+            try {
+              const geocodeResponse = await axios.get(
+                `https://nominatim.openstreetmap.org/search?postalcode=${zip}&country=USA&format=json&limit=1`,
+                { headers: { 
+                  'Accept-Language': 'en-US,en',
+                  'User-Agent': 'Kirova-GroceryApp/1.0'
+                }}
+              );
+              
+              if (geocodeResponse.data && geocodeResponse.data.length > 0) {
+                userLat = parseFloat(geocodeResponse.data[0].lat);
+                userLon = parseFloat(geocodeResponse.data[0].lon);
+                userCity = geocodeResponse.data[0].address?.city || 
+                          geocodeResponse.data[0].address?.town || 
+                          geocodeResponse.data[0].address?.village || 
+                          storedCity || 'McKinney';
+                userState = geocodeResponse.data[0].address?.state || storedState || 'TX';
+                userZip = zip;
+                
+                // Cache the geocoding result
+                cacheGeocodingResult(zipQuery, { 
+                  lat: userLat, 
+                  lon: userLon,
+                  city: userCity,
+                  state: userState
+                });
+              } else {
+                throw new Error('Could not geocode ZIP code');
+              }
+            } catch (geocodeError) {
+              console.error('Error geocoding ZIP:', geocodeError);
+              // Fallback to default coordinates or stored values
+              userLat = 33.1972; // Default to McKinney
+              userLon = -96.6397;
+              userCity = storedCity || 'McKinney';
+              userState = storedState || 'TX';
+              userZip = storedZip || '75070';
+            }
           }
         }
+      }
+      
+      // If we still don't have location, use defaults
+      if (!userLat || !userLon) {
+        console.log("Using default location (McKinney, TX)");
+        userLat = 33.1972; // Default to McKinney
+        userLon = -96.6397;
+        userCity = storedCity || 'McKinney';
+        userState = storedState || 'TX';
+        userZip = storedZip || '75070';
+      }
+      
+      console.log(`Fetching stores near: ${userCity}, ${userState} (${userLat}, ${userLon})`);
+      
+      // Now that we have coordinates, search for nearby grocery stores using Overpass API
+      try {
+        // Build Overpass query - find supermarkets, grocery stores within 10km radius
+        const overpassQuery = `
+          [out:json];
+          (
+            node["shop"="supermarket"](around:10000,${userLat},${userLon});
+            way["shop"="supermarket"](around:10000,${userLat},${userLon});
+            node["shop"="grocery"](around:10000,${userLat},${userLon});
+            way["shop"="grocery"](around:10000,${userLat},${userLon});
+          );
+          out body;
+          >;
+          out skel qt;
+        `;
         
-        // Now that we have coordinates, search for nearby grocery stores using Overpass API
-        try {
-          // Build Overpass query - find supermarkets, grocery stores within 10km radius
-          const overpassQuery = `
-            [out:json];
-            (
-              node["shop"="supermarket"](around:10000,${userLat},${userLon});
-              way["shop"="supermarket"](around:10000,${userLat},${userLon});
-              node["shop"="grocery"](around:10000,${userLat},${userLon});
-              way["shop"="grocery"](around:10000,${userLat},${userLon});
-            );
-            out body;
-            >;
-            out skel qt;
-          `;
-          
-          const overpassResponse = await axios.post(
-            'https://overpass-api.de/api/interpreter',
-            overpassQuery,
-            { 
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              timeout: 10000 // 10 second timeout
-            }
+        const overpassResponse = await axios.post(
+          'https://overpass-api.de/api/interpreter',
+          overpassQuery,
+          { 
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 10000 // 10 second timeout
+          }
+        );
+        
+        if (overpassResponse.data && overpassResponse.data.elements) {
+          // Filter for nodes (point locations) with tags
+          const storeElements = overpassResponse.data.elements.filter(
+            element => (element.type === 'node' || element.type === 'way') && element.tags
           );
           
-          if (overpassResponse.data && overpassResponse.data.elements) {
-            // Filter for nodes (point locations) with tags
-            const storeElements = overpassResponse.data.elements.filter(
-              element => (element.type === 'node' || element.type === 'way') && element.tags
+          if (storeElements.length > 0) {
+            // Process the results into store objects compatible with our StoreCard
+            let storeResults = storeElements.map(element => {
+              // Format address from OSM data or generate fallback
+              let address = '';
+              if (element.tags['addr:housenumber'] && element.tags['addr:street']) {
+                address = `${element.tags['addr:housenumber']} ${element.tags['addr:street']}`;
+                if (element.tags['addr:city']) {
+                  address += `, ${element.tags['addr:city']}`;
+                } else if (userCity) {
+                  address += `, ${userCity}`;
+                }
+                if (element.tags['addr:postcode']) {
+                  address += ` ${element.tags['addr:postcode']}`;
+                } else if (userZip) {
+                  address += ` ${userZip}`;
+                }
+              } else {
+                // Generate fallback address using current location context
+                address = generateFallbackAddress(element.lat, element.lon, userCity, userState, userZip);
+              }
+              
+              // Get store name, preferring the name tag but falling back to brand
+              const name = element.tags.name || element.tags.brand || 'Local Grocery Store';
+              
+              // Get store type based on tags and name
+              const type = getStoreType(name, element.tags);
+              
+              // Price level based on store name/brand
+              const priceLevel = getPriceLevel(name);
+              
+              // Calculate distance
+              const distance = calculateDistance(
+                userLat, 
+                userLon, 
+                element.lat || element.center?.lat, 
+                element.lon || element.center?.lon
+              );
+              
+              // Generate random delivery time
+              const deliveryTime = getRandomDeliveryTime();
+              
+              // Generate offers data (highlighted as placeholder)
+              const offers = generateOffer(name);
+              
+              // Generate placeholder features (highlighted as placeholders)
+              const hasInStorePrice = Math.random() > 0.4; // 60% chance of true
+              const acceptsEbt = Math.random() > 0.3; // 70% chance of true
+              
+              return {
+                id: element.id.toString(),
+                name: name,
+                address: address,
+                city: userCity,
+                state: userState,
+                lat: element.lat || element.center?.lat,
+                lon: element.lon || element.center?.lon,
+                distance: distance,
+                type: type,
+                deliveryTime: deliveryTime, // PLACEHOLDER
+                priceLevel: priceLevel,
+                hasInStorePrice: hasInStorePrice, // PLACEHOLDER 
+                acceptsEbt: acceptsEbt, // PLACEHOLDER
+                offers: offers, // PLACEHOLDER
+                isRealLocation: true,
+                hasPlaceholderData: true // Flag to indicate enhanced fields are placeholders
+              };
+            });
+            
+            // Remove duplicates (same store name within 0.2 miles)
+            const uniqueStores = [];
+            const storeMap = new Map();
+            
+            storeResults.forEach(store => {
+              const key = store.name.toLowerCase();
+              
+              if (!storeMap.has(key)) {
+                storeMap.set(key, store);
+                uniqueStores.push(store);
+              } else {
+                const existingStore = storeMap.get(key);
+                // Keep the closer store
+                if (store.distance < existingStore.distance) {
+                  const index = uniqueStores.findIndex(s => s.name.toLowerCase() === key);
+                  if (index !== -1) {
+                    uniqueStores[index] = store;
+                    storeMap.set(key, store);
+                  }
+                }
+              }
+            });
+            
+            // Sort by distance
+            uniqueStores.sort((a, b) => a.distance - b.distance);
+            
+            // Sanitize to ensure no undefined values that could cause Firestore errors
+            const sanitizedStores = uniqueStores.map(store => 
+              sanitizeStoreData(store, userCity, userState)
             );
             
-            if (storeElements.length > 0) {
-              // Process the results into store objects compatible with our StoreCard
-              let storeResults = storeElements.map(element => {
-                // Format address from OSM data or generate fallback
-                let address = '';
-                if (element.tags['addr:housenumber'] && element.tags['addr:street']) {
-                  address = `${element.tags['addr:housenumber']} ${element.tags['addr:street']}`;
-                  if (element.tags['addr:city']) {
-                    address += `, ${element.tags['addr:city']}`;
-                  } else if (userCity) {
-                    address += `, ${userCity}`;
-                  }
-                  if (element.tags['addr:postcode']) {
-                    address += ` ${element.tags['addr:postcode']}`;
-                  } else if (userZip) {
-                    address += ` ${userZip}`;
-                  }
-                } else {
-                  // Generate fallback address
-                  address = generateFallbackAddress(element.lat, element.lon, userCity, userState, userZip);
-                }
-                
-                // Get store name, preferring the name tag but falling back to brand
-                const name = element.tags.name || element.tags.brand || 'Local Grocery Store';
-                
-                // Get store type based on tags and name
-                const type = getStoreType(name, element.tags);
-                
-                // Price level based on store name/brand
-                const priceLevel = getPriceLevel(name);
-                
-                // Calculate distance
-                const distance = calculateDistance(
-                  userLat, 
-                  userLon, 
-                  element.lat || element.center?.lat, 
-                  element.lon || element.center?.lon
-                );
-                
-                // Generate random delivery time
-                const deliveryTime = getRandomDeliveryTime();
-                
-                // Generate offers data (highlighted as placeholder)
-                const offers = generateOffer(name);
-                
-                // Generate placeholder features (highlighted as placeholders)
-                const hasInStorePrice = Math.random() > 0.4; // 60% chance of true
-                const acceptsEbt = Math.random() > 0.3; // 70% chance of true
-                
-                return {
-                  id: element.id.toString(),
-                  name: name,
-                  address: address,
-                  lat: element.lat || element.center?.lat,
-                  lon: element.lon || element.center?.lon,
-                  distance: distance,
-                  type: type,
-                  deliveryTime: deliveryTime, // PLACEHOLDER
-                  priceLevel: priceLevel,
-                  hasInStorePrice: hasInStorePrice, // PLACEHOLDER 
-                  acceptsEbt: acceptsEbt, // PLACEHOLDER
-                  offers: offers, // PLACEHOLDER
-                  isRealLocation: true,
-                  hasPlaceholderData: true // Flag to indicate enhanced fields are placeholders
-                };
-              });
-              
-              // Remove duplicates (same store name within 0.2 miles)
-              const uniqueStores = [];
-              const storeMap = new Map();
-              
-              storeResults.forEach(store => {
-                const key = store.name.toLowerCase();
-                
-                if (!storeMap.has(key)) {
-                  storeMap.set(key, store);
-                  uniqueStores.push(store);
-                } else {
-                  const existingStore = storeMap.get(key);
-                  // Keep the closer store
-                  if (store.distance < existingStore.distance) {
-                    const index = uniqueStores.findIndex(s => s.name.toLowerCase() === key);
-                    if (index !== -1) {
-                      uniqueStores[index] = store;
-                      storeMap.set(key, store);
-                    }
-                  }
-                }
-              });
-              
-              // Sort by distance
-              uniqueStores.sort((a, b) => a.distance - b.distance);
-              
-              // Sanitize to ensure no undefined values that could cause Firestore errors
-              const sanitizedStores = uniqueStores.map(store => sanitizeStoreData(store));
-              setStores(sanitizedStores);
-            } else {
-              // If no real stores found, fall back to mock data but use real location
-              const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData({
+            // Cache the store data for this location
+            cacheStoreData(locationKey, sanitizedStores);
+            
+            setStores(sanitizedStores);
+          } else {
+            console.log("No real stores found, using mock data");
+            // If no real stores found, fall back to mock data but use real location
+            const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData(
+              {
                 ...store,
                 distance: calculateDistance(userLat, userLon, store.lat, store.lon),
                 hasPlaceholderData: true // Flag mock data
-              }));
-              
-              setStores(updatedMockStores);
-            }
-          } else {
-            // If API fails, use mock data but with real distances
-            const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData({
-              ...store,
-              distance: calculateDistance(userLat, userLon, store.lat, store.lon),
-              hasPlaceholderData: true // Flag mock data
-            }));
+              },
+              userCity,
+              userState
+            ));
+            
+            // Cache the mock stores too
+            cacheStoreData(locationKey, updatedMockStores);
             
             setStores(updatedMockStores);
           }
-        } catch (overpassError) {
-          console.error('Error fetching places from Overpass API:', overpassError);
-          // Fall back to mock data with calculated distances
-          const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData({
-            ...store,
-            distance: calculateDistance(userLat, userLon, store.lat, store.lon),
-            hasPlaceholderData: true // Flag mock data
-          }));
+        } else {
+          console.log("Invalid API response, using mock data");
+          // If API fails, use mock data but with real distances
+          const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData(
+            {
+              ...store,
+              distance: calculateDistance(userLat, userLon, store.lat, store.lon),
+              hasPlaceholderData: true // Flag mock data
+            },
+            userCity,
+            userState
+          ));
+          
+          // Cache the mock stores too
+          cacheStoreData(locationKey, updatedMockStores);
           
           setStores(updatedMockStores);
         }
+      } catch (overpassError) {
+        console.error('Error fetching places from Overpass API:', overpassError);
+        // Fall back to mock data with calculated distances
+        const updatedMockStores = MOCK_STORES.map(store => sanitizeStoreData(
+          {
+            ...store,
+            distance: calculateDistance(userLat, userLon, store.lat, store.lon),
+            hasPlaceholderData: true // Flag mock data
+          },
+          userCity,
+          userState
+        ));
         
-        setError(null);
-      } catch (err) {
-        console.error('Error in store fetching process:', err);
-        setError('Failed to load stores. Please try again later.');
-        // Use sanitized mock data as fallback
-        setStores(MOCK_STORES.map(store => sanitizeStoreData(store)));
-      } finally {
-        setLoading(false);
+        // Cache the mock stores too
+        cacheStoreData(locationKey, updatedMockStores);
+        
+        setStores(updatedMockStores);
       }
+      
+      setError(null);
+      setLoading(false);
     };
 
     fetchStores();

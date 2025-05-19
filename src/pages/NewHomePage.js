@@ -1,4 +1,4 @@
-// pages/NewHomePage.js - Fixed version
+// src/pages/NewHomePage.js
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../context/AuthContext';
@@ -218,7 +218,9 @@ const NewHomePage = () => {
   const navigate = useNavigate();
   const [userProfile, setUserProfile] = useState({
     name: '',
-    zip: '75070', // Default to McKinney zip
+    city: '',
+    state: '',
+    zip: '',
     totalSaved: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -259,22 +261,54 @@ const NewHomePage = () => {
 
     const fetchUserData = async () => {
       try {
+        // Check localStorage first for most recent location
+        const storedCity = localStorage.getItem('userCity');
+        const storedState = localStorage.getItem('userState');
+        const storedZip = localStorage.getItem('userZip');
+        
+        let localData = {};
+        if (storedCity && storedState) {
+          localData = {
+            city: storedCity,
+            state: storedState,
+            zip: storedZip || ''
+          };
+        }
+        
+        // Then check user profile in Firestore
         const docRef = doc(db, 'users', currentUser.uid);
         const snapshot = await getDoc(docRef);
-        const data = snapshot.data() || {};
+        const userData = snapshot.data() || {};
         
+        // Merge userData with localStorage data, prioritizing localStorage
         setUserProfile({
-          name: data.name || '',
-          zip: data.zip || (location && location.zip) || '75070',
-          totalSaved: data.totalSaved || 0
+          name: userData.name || '',
+          zip: localData.zip || userData.zip || (location && location.zip) || '',
+          city: localData.city || userData.city || (location && location.city) || '',
+          state: localData.state || userData.state || (location && location.state) || '',
+          totalSaved: userData.totalSaved || 0
         });
         
-        // If we got location from browser but not from DB, update the DB
-        if (location && location.zip && (!data.zip || data.zip !== location.zip)) {
+        // If we have localStorage location but not in DB, update the DB
+        if (storedCity && storedState && (!userData.city || !userData.state)) {
           await setDoc(docRef, { 
-            zip: location.zip || '75070',
-            city: location.city || 'McKinney',
-            state: location.state || 'TX'
+            city: storedCity,
+            state: storedState,
+            zip: storedZip || ''
+          }, { merge: true });
+        }
+        // If we got location from browser but nothing in DB or localStorage, update both
+        else if (location && location.city && location.state && 
+                (!userData.city || !userData.state) && 
+                (!storedCity || !storedState)) {
+          localStorage.setItem('userCity', location.city);
+          localStorage.setItem('userState', location.state);
+          if (location.zip) localStorage.setItem('userZip', location.zip);
+          
+          await setDoc(docRef, { 
+            city: location.city,
+            state: location.state,
+            zip: location.zip || ''
           }, { merge: true });
         }
       } catch (err) {
@@ -289,7 +323,7 @@ const NewHomePage = () => {
 
   useEffect(() => {
     const saveStoreData = async () => {
-      if (!currentUser || !stores || !stores.length) return;
+      if (!currentUser || !stores.length) return;
       
       try {
         // Only save first 10 stores to Firestore to keep document size manageable
@@ -336,6 +370,11 @@ const NewHomePage = () => {
     // Request a new location from the browser
     requestLocation();
   };
+  
+  // Handler for refreshing the store list when location changes
+  const handleLocationRefresh = () => {
+    window.location.reload();
+  };
 
   if (loading) {
     return (
@@ -353,8 +392,8 @@ const NewHomePage = () => {
         <WelcomeContainer>
           <Greeting>👋 Hi, {userProfile.name || 'there'}!</Greeting>
           <SubGreeting>
-            {location && location.city ? 
-              `We've found grocery deals near ${location.city}, ${location.state || 'TX'}.` : 
+            {userProfile.city ? 
+              `We've found grocery deals near ${userProfile.city}, ${userProfile.state || 'TX'}.` : 
               'We\'ve found grocery deals around you.'
             }
             {userProfile.totalSaved > 0 && ` You've saved $${userProfile.totalSaved.toFixed(2)} so far!`}
@@ -406,10 +445,11 @@ const NewHomePage = () => {
           </NoStoresContainer>
         ) : (
           <StoreList 
-            title={location ? `Stores near ${location.city || userProfile.zip || 'you'}` : "Stores near you"}
+            title={userProfile.city ? `Stores near ${userProfile.city}` : "Stores near you"}
             stores={stores} 
             loading={storesLoading}
             viewAllLink="/stores"
+            onUpdateLocation={handleLocationRefresh}
           />
         )}
         

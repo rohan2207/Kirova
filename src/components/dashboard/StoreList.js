@@ -1,5 +1,5 @@
-// components/dashboard/StoreList.js
-import React, { useState } from 'react';
+// src/components/dashboard/StoreList.js
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
 import StoreCard from './StoreCard';
@@ -144,8 +144,32 @@ const PlaceholderNotice = styled.div`
   display: ${props => props.show ? 'block' : 'none'};
 `;
 
+const LocationMismatchAlert = styled.div`
+  background-color: #fff3cd;
+  border: 1px solid #ffeeba;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+`;
+
+const RefreshButton = styled.button`
+  background-color: #2F8A11;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  margin-top: 8px;
+  cursor: pointer;
+  
+  &:hover {
+    background-color: #267610;
+  }
+`;
+
 const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateLocation }) => {
-  const [displayCount, setDisplayCount] = useState(5);
+  // Start with displaying 6 stores initially
+  const [displayCount, setDisplayCount] = useState(6);
+  const [locationMismatch, setLocationMismatch] = useState(false);
   
   // Ensure stores is an array
   const safeStores = Array.isArray(stores) ? stores : [];
@@ -155,6 +179,25 @@ const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateL
     store.hasPlaceholderData || !store.isRealLocation
   );
   
+  // Check if stores match the current selected location
+  useEffect(() => {
+    const storedCity = localStorage.getItem('userCity');
+    const storedState = localStorage.getItem('userState');
+    
+    if (storedCity && storedState && safeStores.length > 0) {
+      // Check if any store has the city/state in the address or matches the city/state properties
+      const hasMatchingStore = safeStores.some(store => {
+        const hasMatchingCity = store.city && store.city.toLowerCase() === storedCity.toLowerCase();
+        const hasMatchingState = store.state && store.state.toLowerCase() === storedState.toLowerCase();
+        const addressContainsCity = store.address && store.address.toLowerCase().includes(storedCity.toLowerCase());
+        
+        return (hasMatchingCity && hasMatchingState) || addressContainsCity;
+      });
+      
+      setLocationMismatch(!hasMatchingStore);
+    }
+  }, [safeStores]);
+  
   // Show loading skeletons when loading
   if (loading) {
     return (
@@ -163,7 +206,7 @@ const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateL
           {title}
         </SectionTitle>
         <StoreListSkeleton>
-          {[1, 2, 3, 4, 5].map((i) => (
+          {[1, 2, 3, 4, 5, 6].map((i) => (
             <StoreCardSkeleton key={i} />
           ))}
         </StoreListSkeleton>
@@ -189,15 +232,37 @@ const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateL
     );
   }
   
-  // The visible stores based on current display count
-  const visibleStores = safeStores.slice(0, displayCount);
+  // Get the maximum number of stores we'll display (20 or less if there are fewer stores)
+  const maxStores = Math.min(20, safeStores.length);
   
-  // Show more button if there are more stores to display
-  const hasMoreStores = safeStores.length > displayCount;
+  // The visible stores based on current display count (limited to maxStores)
+  const visibleStores = safeStores.slice(0, Math.min(displayCount, maxStores));
+  
+  // Show more button if there are more stores to display (up to maximum)
+  const hasMoreToShow = displayCount < maxStores;
   
   const handleShowMore = () => {
-    // Show all remaining stores
-    setDisplayCount(safeStores.length);
+    // Show up to maxStores (20)
+    setDisplayCount(maxStores);
+  };
+  
+  // Handle the refresh button click
+  const handleRefresh = () => {
+    // Clear location-specific cache
+    const storedCity = localStorage.getItem('userCity');
+    const storedState = localStorage.getItem('userState');
+    const locationKey = storedCity && storedState 
+      ? `${storedCity.toLowerCase()}_${storedState.toLowerCase()}`
+      : localStorage.getItem('userZip') || 'default';
+    
+    // Remove the specific store cache for this location
+    localStorage.removeItem(`kirova_stores_${locationKey}`);
+    
+    // Set flag to force reload on next fetch
+    localStorage.setItem('kirova_location_changed', 'true');
+    
+    // Force page reload
+    window.location.reload();
   };
   
   return (
@@ -207,6 +272,15 @@ const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateL
         {viewAllLink && <ViewAllLink to={viewAllLink}>View All</ViewAllLink>}
       </SectionTitle>
       
+      {locationMismatch && (
+        <LocationMismatchAlert>
+          <p>Stores shown may not match your selected location. Click "Refresh" to update.</p>
+          <RefreshButton onClick={handleRefresh}>
+            Refresh Stores
+          </RefreshButton>
+        </LocationMismatchAlert>
+      )}
+      
       {visibleStores.length > 0 && (
         <>
           <StoreGrid>
@@ -215,9 +289,9 @@ const StoreList = ({ title, stores = [], viewAllLink, loading = false, onUpdateL
             ))}
           </StoreGrid>
           
-          {hasMoreStores && (
+          {hasMoreToShow && (
             <SeeMoreButton onClick={handleShowMore}>
-              See {safeStores.length - displayCount} More Stores
+              See {maxStores - displayCount} More Stores
             </SeeMoreButton>
           )}
         </>
