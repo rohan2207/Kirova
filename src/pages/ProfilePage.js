@@ -1,4 +1,4 @@
-// src/pages/ProfilePage.js
+// src/pages/ProfilePage.js - Updated to ensure proper data loading
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../context/AuthContext';
@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import Sidebar from '../components/dashboard/Sidebar';
 import Button from '../components/common/Button';
+import { toast } from 'react-toastify';
 
 const PageContainer = styled.div`
   display: flex;
@@ -83,6 +84,22 @@ const SuccessMessage = styled.p`
   font-size: 14px;
 `;
 
+const LoadingSpinner = styled.div`
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(47, 138, 17, 0.2);
+  border-radius: 50%;
+  border-top-color: #2F8A11;
+  animation: spin 1s ease-in-out infinite;
+  margin: 2rem auto;
+  display: block;
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+`;
+
 const ProfilePage = () => {
   const { currentUser } = useAuth();
   const [userProfile, setUserProfile] = useState({
@@ -97,20 +114,33 @@ const ProfilePage = () => {
     state: '',
     zip: ''
   });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Log current user to debug
+  useEffect(() => {
+    console.log("Current user in ProfilePage:", currentUser);
+  }, [currentUser]);
+
   useEffect(() => {
     const fetchUserProfile = async () => {
-      if (!currentUser) return;
+      if (!currentUser) {
+        console.log("No current user found");
+        setLoading(false);
+        return;
+      }
       
       try {
+        console.log("Fetching user profile for:", currentUser.uid);
         setLoading(true);
         const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
         
         if (userDoc.exists()) {
           const userData = userDoc.data();
+          console.log("User data retrieved:", userData);
+          
+          // Set up profile data
           setUserProfile({
             name: userData.name || '',
             email: userData.email || currentUser.email || '',
@@ -118,9 +148,28 @@ const ProfilePage = () => {
             phone: userData.phone || ''
           });
           
+          // Look for address data in various possible locations
           if (userData.homeAddress) {
             setHomeAddress(userData.homeAddress);
+          } else if (userData.primaryAddress) {
+            // Try to use primaryAddress if homeAddress doesn't exist
+            setHomeAddress({
+              line1: userData.primaryAddress.line1 || '',
+              city: userData.primaryAddress.city || '',
+              state: userData.primaryAddress.state || '',
+              zip: userData.primaryAddress.zip || ''
+            });
+          } else {
+            // Fall back to direct fields if neither address object exists
+            setHomeAddress({
+              line1: userData.address || '',
+              city: userData.city || '',
+              state: userData.state || '',
+              zip: userData.zip || ''
+            });
           }
+        } else {
+          console.log("User document does not exist");
         }
       } catch (error) {
         console.error("Error fetching user profile:", error);
@@ -143,18 +192,41 @@ const ProfilePage = () => {
       setError('');
       setSuccess('');
       
-      // Update user profile in Firestore
+      console.log("Updating profile with:", { userProfile, homeAddress });
+      
+      // Update both the primary address object and the direct fields for compatibility
       await updateDoc(doc(db, 'users', currentUser.uid), {
         name: userProfile.name,
-        zip: userProfile.zip,
+        zip: homeAddress.zip || userProfile.zip, // Prefer address zip over profile zip
         phone: userProfile.phone,
-        homeAddress: homeAddress
+        address: homeAddress.line1,
+        city: homeAddress.city,
+        state: homeAddress.state,
+        // Update address objects
+        homeAddress: homeAddress,
+        primaryAddress: {
+          ...homeAddress,
+          id: `primary-${Date.now()}`,
+          isHome: true,
+          timestamp: new Date().toISOString()
+        }
       });
       
+      // Save to localStorage for immediate use
+      localStorage.setItem('userCity', homeAddress.city);
+      localStorage.setItem('userState', homeAddress.state);
+      localStorage.setItem('userZip', homeAddress.zip);
+      localStorage.setItem('userAddress', homeAddress.line1);
+      
+      // Set flag to indicate location change
+      localStorage.setItem('kirova_location_changed', 'true');
+      
       setSuccess("Profile updated successfully!");
+      toast.success("Profile updated successfully!");
     } catch (error) {
       console.error("Error updating profile:", error);
       setError("Failed to update profile");
+      toast.error("Failed to update profile");
     } finally {
       setLoading(false);
     }
@@ -175,6 +247,18 @@ const ProfilePage = () => {
       [name]: value
     }));
   };
+
+  if (loading && !userProfile.email) {
+    return (
+      <PageContainer>
+        <Sidebar />
+        <MainContent>
+          <PageTitle>Your Profile</PageTitle>
+          <LoadingSpinner />
+        </MainContent>
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer>
@@ -218,18 +302,7 @@ const ProfilePage = () => {
               />
             </FormGroup>
             
-            <FormGroup>
-              <Label>ZIP Code</Label>
-              <Input 
-                type="text"
-                name="zip"
-                value={userProfile.zip}
-                onChange={handleInputChange}
-                placeholder="Enter your ZIP code"
-              />
-            </FormGroup>
-            
-            <SectionTitle>Home Address</SectionTitle>
+            <SectionTitle style={{marginTop: "32px"}}>Home Address</SectionTitle>
             
             <FormGroup>
               <Label>Street Address</Label>

@@ -1,7 +1,8 @@
-// src/components/navbar/CartIcon.js
-import React from 'react';
+// src/components/navbar/CartIcon.js - With count from localStorage
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 
 const CartButton = styled(Link)`
   position: relative;
@@ -44,8 +45,41 @@ const CartCount = styled.span`
   font-weight: 700;
 `;
 
-const CartIconComponent = ({ count, currentUser }) => {
+const CartIconComponent = ({ currentUser }) => {
   const navigate = useNavigate();
+  const [cartCount, setCartCount] = useState(0);
+  
+  // Update cart count from localStorage
+  const updateCartCount = () => {
+    try {
+      const cart = JSON.parse(localStorage.getItem('shoppingCart')) || [];
+      // Calculate total items (sum of quantities)
+      const count = cart.reduce((total, item) => total + (item.quantity || 1), 0);
+      setCartCount(count);
+    } catch (error) {
+      console.error('Error reading cart from localStorage:', error);
+      setCartCount(0);
+    }
+  };
+  
+  // Initialize cart count and listen for updates
+  useEffect(() => {
+    // Initial update
+    updateCartCount();
+    
+    // Listen for cart updates
+    const handleCartUpdate = () => {
+      updateCartCount();
+    };
+    
+    // Add event listener
+    window.addEventListener('cartUpdated', handleCartUpdate);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('cartUpdated', handleCartUpdate);
+    };
+  }, []);
   
   // Choose destination based on authentication status
   const cartDestination = currentUser ? "/cart" : "#";
@@ -53,9 +87,13 @@ const CartIconComponent = ({ count, currentUser }) => {
   const handleCartClick = (e) => {
     if (!currentUser) {
       e.preventDefault();
+      // We'll navigate to signup and pass a welcome message
       navigate('/signup', {
         state: { message: "👋 Let's get you signed up to start building your cart and saving money!" }
       });
+    } else if (cartCount === 0) {
+      e.preventDefault();
+      toast.info("Your cart is empty. Add some items to get started!");
     }
   };
   
@@ -73,7 +111,7 @@ const CartIconComponent = ({ count, currentUser }) => {
           <circle cx="52" cy="40" r="2.5" fill="none" stroke="#2F8A11" strokeWidth="1.5" />
         </svg>
       </CartIcon>
-      {count > 0 && currentUser && <CartCount>{count}</CartCount>}
+      {cartCount > 0 && <CartCount>{cartCount}</CartCount>}
     </CartButton>
   );
 };

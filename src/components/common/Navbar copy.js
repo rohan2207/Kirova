@@ -1,16 +1,96 @@
-// src/components/navbar/LocationSelector.js - Updated with privacy fixes
+// src/components/common/Navbar.js
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import Button from './Button';
+import useUserLocation from '../../hooks/useUserLocation';
 import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
-import useUserLocation from '../../hooks/useUserLocation';
 import axios from 'axios';
 import debounce from 'lodash/debounce';
 import { toast } from 'react-toastify';
 
-// Styled components - these remain the same as your original file
-const LocationButton = styled.button`
+const NavContainer = styled.nav`
+  background-color: white;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  padding: 12px 0;
+`;
+
+const NavContent = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+
+  @media (max-width: 768px) {
+    padding: 0 20px;
+  }
+`;
+
+const LogoText = styled(Link)`
+  font-size: 2.7rem;
+  font-weight: 700;
+  color: #2F4A22;
+  text-decoration: none;
+  letter-spacing: -1px;
+  display: flex;
+  align-items: center;
+  height: 70px;
+`;
+
+const SearchContainer = styled.div`
+  position: relative;
+  flex: 1.2;
+  margin: 0 32px;
+
+  @media (max-width: 768px) {
+    max-width: 100%;
+    margin: 0 16px;
+  }
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  padding: 12px 44px;
+  border-radius: 30px;
+  border: 1px solid #dcdcdc;
+  background-color: #f7f7f7;
+  font-size: 16px;
+  outline: none;
+
+  &:focus {
+    border-color: #2F8A11;
+    background-color: white;
+    box-shadow: 0 0 0 2px rgba(47, 138, 17, 0.2);
+  }
+`;
+
+const SearchIcon = styled.div`
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #666;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+`;
+
+const NavRight = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+`;
+
+const LocationSelector = styled.button`
   display: flex;
   align-items: center;
   background: none;
@@ -44,7 +124,67 @@ const LocationText = styled.span`
   }
 `;
 
-const Modal = styled.div`
+const NavLinks = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 24px;
+
+  @media (max-width: 768px) {
+    display: ${props => (props.isOpen ? 'flex' : 'none')};
+    flex-direction: column;
+    position: absolute;
+    top: 68px;
+    left: 0;
+    right: 0;
+    background-color: white;
+    box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+    padding: 20px;
+    z-index: 1000;
+  }
+`;
+
+const CartButton = styled(Link)`
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  height: 70px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  margin-left: 10px;
+
+  &:hover {
+    background-color: #f7f7f7;
+    border-radius: 50%;
+  }
+`;
+
+const CartIcon = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  svg {
+    width: 70px;
+    height: 70px;
+  }
+`;
+
+const CartCount = styled.span`
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background-color: #2F8A11;
+  color: white;
+  border-radius: 12px;
+  font-size: 12px;
+  padding: 2px 6px;
+  font-weight: 700;
+`;
+
+const LocationModal = styled.div`
   position: fixed;
   top: 0;
   left: 0;
@@ -57,7 +197,7 @@ const Modal = styled.div`
   z-index: 1100;
 `;
 
-const ModalContent = styled.div`
+const LocationModalContent = styled.div`
   background-color: white;
   border-radius: 8px;
   padding: 24px;
@@ -96,7 +236,7 @@ const SearchBar = styled.div`
   margin-bottom: 20px;
 `;
 
-const SearchInput = styled.input`
+const SearchInputField = styled.input`
   width: 100%;
   padding: 12px 40px 12px 12px;
   border: 1px solid #dcdcdc;
@@ -204,6 +344,19 @@ const CurrentLocationButton = styled.div`
   }
 `;
 
+const LocationPin = styled.div`
+  margin-right: 16px;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: #2F8A11;
+  
+  svg {
+    width: 24px;
+    height: 24px;
+  }
+`;
+
 const LoadingSpinner = styled.div`
   display: inline-block;
   width: 24px;
@@ -251,26 +404,32 @@ const AutocompleteItem = styled.li`
   }
 `;
 
-const LocationSelector = ({ currentUser }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+const Navbar = () => {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [addressSearch, setAddressSearch] = useState('');
   const [homeAddress, setHomeAddress] = useState(null);
   const [primaryAddress, setPrimaryAddress] = useState(null);
   const [recentLocations, setRecentLocations] = useState([]);
-  const [currentLocation, setCurrentLocation] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null); // Currently active location
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [autocompleteResults, setAutocompleteResults] = useState([]);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const [displayLocation, setDisplayLocation] = useState('');
+  const [searchQuery, setSearchQuery] = useState(''); // For main search bar
   
+  const { currentUser, signOut } = useAuth();
   const navigate = useNavigate();
-  const locationPath = window.location.pathname; // Get current path for refresh check
+  const locationPath = useLocation();
+  const [cartCount] = useState(currentUser ? 3 : 0);
   const autocompleteRef = useRef(null);
   
-  // Use location hook
-  const { location: userLocation, error: locationHookError, requestLocation } = useUserLocation();
+  // Use the location hook to get user's location
+  const { location: userLocation, error: locationHookError, requestLocation, isRequesting } = useUserLocation();
   
+  // Display location state
+  const [displayLocation, setDisplayLocation] = useState('');
+
   // Listen for location changes that might happen elsewhere in the app
   useEffect(() => {
     const handleStorageChange = () => {
@@ -293,249 +452,18 @@ const LocationSelector = ({ currentUser }) => {
     window.addEventListener('focus', handleStorageChange);
     return () => window.removeEventListener('focus', handleStorageChange);
   }, []);
+
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [locationPath]);
   
-  // Function to create a standardized address from profile fields
-  const createAddressFromFields = (userData) => {
-    if (!userData.city || !userData.state) return null;
+  // Main search handler
+  const handleSearch = (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
     
-    return {
-      id: `primary-${Date.now()}`,
-      line1: userData.address || "",
-      city: userData.city,
-      state: userData.state,
-      zip: userData.zip || "",
-      isHome: true,
-      timestamp: new Date().toISOString()
-    };
+    navigate(`/search?q=${encodeURIComponent(searchQuery)}`);
   };
-  
-  // Load user addresses on component mount
-  useEffect(() => {
-    const loadUserAddresses = async () => {
-      try {
-        console.log("Loading user addresses...");
-        
-        // Clear recent locations when user changes
-        setRecentLocations([]);
-        
-        // 1. Check user profile first if logged in
-        if (currentUser) {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          const userData = userDoc.data() || {};
-          
-          console.log("User profile data:", userData);
-          
-          // Primary address gets highest priority - check it first
-          let foundPrimaryAddress = false;
-          
-          // Check for primaryAddress object
-          if (userData.primaryAddress && userData.primaryAddress.city && userData.primaryAddress.state) {
-            console.log("Found primary address object:", userData.primaryAddress);
-            setPrimaryAddress(userData.primaryAddress);
-            setCurrentLocation(userData.primaryAddress);
-            setHomeAddress(userData.primaryAddress);
-            setDisplayLocation(`${userData.primaryAddress.city}, ${userData.primaryAddress.state}`);
-            foundPrimaryAddress = true;
-            
-            // Save to localStorage
-            localStorage.setItem('userCity', userData.primaryAddress.city);
-            localStorage.setItem('userState', userData.primaryAddress.state);
-            localStorage.setItem('userZip', userData.primaryAddress.zip || '');
-            localStorage.setItem('userAddress', userData.primaryAddress.line1 || '');
-          } 
-          // If not, try to construct from individual fields
-          else if (userData.city && userData.state) {
-            console.log("Creating primary address from fields");
-            const constructedAddress = createAddressFromFields(userData);
-            
-            if (constructedAddress) {
-              setPrimaryAddress(constructedAddress);
-              setCurrentLocation(constructedAddress);
-              setHomeAddress(constructedAddress);
-              setDisplayLocation(`${constructedAddress.city}, ${constructedAddress.state}`);
-              foundPrimaryAddress = true;
-              
-              // Save this constructed address back to user profile
-              await updateDoc(doc(db, 'users', currentUser.uid), {
-                primaryAddress: constructedAddress
-              });
-              
-              // Save to localStorage
-              localStorage.setItem('userCity', constructedAddress.city);
-              localStorage.setItem('userState', constructedAddress.state);
-              localStorage.setItem('userZip', constructedAddress.zip || '');
-              localStorage.setItem('userAddress', constructedAddress.line1 || '');
-            }
-          }
-          
-          // Then check for most recently used location if we didn't find a primary address
-          // or if we have a lastUsedLocation that's different from primary
-          if (userData.lastUsedLocation && userData.lastUsedLocation.city && userData.lastUsedLocation.state) {
-            console.log("Found last used location:", userData.lastUsedLocation);
-            
-            if (!foundPrimaryAddress || 
-                (userData.primaryAddress && 
-                 (userData.lastUsedLocation.city !== userData.primaryAddress.city || 
-                  userData.lastUsedLocation.state !== userData.primaryAddress.state))) {
-              setCurrentLocation(userData.lastUsedLocation);
-              setHomeAddress(userData.lastUsedLocation);
-              setDisplayLocation(`${userData.lastUsedLocation.city}, ${userData.lastUsedLocation.state}`);
-              
-              // Save to localStorage
-              localStorage.setItem('userCity', userData.lastUsedLocation.city);
-              localStorage.setItem('userState', userData.lastUsedLocation.state);
-              localStorage.setItem('userZip', userData.lastUsedLocation.zip || '');
-              localStorage.setItem('userAddress', userData.lastUsedLocation.line1 || '');
-            }
-          }
-          
-          // Load recent locations (if any) - ONLY FOR LOGGED IN USER
-          if (userData.recentLocations && Array.isArray(userData.recentLocations)) {
-            // Sort by timestamp and limit to 5
-            const sortedLocations = [...userData.recentLocations]
-              .filter(loc => loc && loc.city && loc.state) // Filter out invalid entries
-              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-              .slice(0, 5);
-            
-            console.log("Setting recent locations:", sortedLocations);
-            setRecentLocations(sortedLocations);
-          }
-          
-          return;
-        }
-        
-        // 2. Check localStorage if no user profile address
-        const storedCity = localStorage.getItem('userCity');
-        const storedState = localStorage.getItem('userState');
-        const storedZip = localStorage.getItem('userZip');
-        const storedAddress = localStorage.getItem('userAddress');
-        
-        if (storedCity && storedState) {
-          const currentAddr = {
-            id: 'current',
-            line1: storedAddress || `${storedCity}, ${storedState} ${storedZip || ''}`,
-            city: storedCity,
-            state: storedState,
-            zip: storedZip || '',
-            isHome: false,
-            timestamp: new Date().toISOString()
-          };
-          
-          setCurrentLocation(currentAddr);
-          setHomeAddress(currentAddr);
-          setDisplayLocation(`${storedCity}, ${storedState}`);
-        }
-      } catch (error) {
-        console.error("Error loading user addresses:", error);
-      }
-    };
-    
-    loadUserAddresses();
-  }, [currentUser]); // Adding currentUser as a dependency to reload when user changes
-  
-  // Update from geolocation if available
-  useEffect(() => {
-    if (userLocation) {
-      // Check if we specifically requested to use current location
-      const forceUseCurrentLocation = isGettingLocation;
-      
-      // Use browser location if no home address is set OR if we specifically requested current location
-      if (!homeAddress || forceUseCurrentLocation) {
-        const locationText = userLocation.city && userLocation.state
-          ? `${userLocation.city}, ${userLocation.state}`
-          : userLocation.zip || 'Location set';
-          
-        setDisplayLocation(locationText);
-        
-        // Create address from browser location
-        if (userLocation.city && userLocation.state) {
-          const newAddress = {
-            id: `loc-${Date.now()}`,
-            line1: userLocation.address || locationText,
-            city: userLocation.city,
-            state: userLocation.state,
-            zip: userLocation.zip || '',
-            lat: userLocation.latitude,
-            lon: userLocation.longitude,
-            isHome: false,
-            timestamp: new Date().toISOString()
-          };
-          
-          setCurrentLocation(newAddress);
-          setHomeAddress(newAddress);
-          
-          // Save to localStorage
-          localStorage.setItem('userCity', userLocation.city);
-          localStorage.setItem('userState', userLocation.state);
-          if (userLocation.zip) localStorage.setItem('userZip', userLocation.zip);
-          if (userLocation.address) localStorage.setItem('userAddress', userLocation.address);
-          
-          // Set flag to indicate location change
-          localStorage.setItem('kirova_location_changed', 'true');
-          
-          // Save to user profile if logged in
-          if (currentUser) {
-            const saveLocationToProfile = async () => {
-              try {
-                const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-                const userData = userDoc.data() || {};
-                
-                // Update recent locations
-                let updatedRecentLocations = userData.recentLocations || [];
-                
-                // Add current location if not already in the list
-                const isDuplicate = updatedRecentLocations.some(
-                  loc => loc.city === newAddress.city && loc.state === newAddress.state
-                );
-                
-                if (!isDuplicate) {
-                  updatedRecentLocations.unshift(newAddress);
-                  
-                  // Sort by timestamp and limit to 5
-                  updatedRecentLocations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                  updatedRecentLocations = updatedRecentLocations.slice(0, 5);
-                }
-                
-                // Update the user document with the new location and also update individual fields
-                await updateDoc(doc(db, 'users', currentUser.uid), {
-                  recentLocations: updatedRecentLocations,
-                  lastUsedLocation: newAddress,
-                  city: newAddress.city,
-                  state: newAddress.state,
-                  zip: newAddress.zip,
-                  address: newAddress.line1
-                });
-                
-                // Update local state
-                setRecentLocations(updatedRecentLocations);
-              } catch (error) {
-                console.error("Error saving location to profile:", error);
-              }
-            };
-            
-            // Call the async function
-            saveLocationToProfile();
-          }
-        }
-      }
-      
-      // Close location modal if it was getting location
-      if (isGettingLocation) {
-        setIsGettingLocation(false);
-        setTimeout(() => {
-          setIsModalOpen(false);
-        }, 500);
-      }
-    }
-  }, [userLocation, homeAddress, currentUser, isGettingLocation]);
-  
-  useEffect(() => {
-    // If location hook returns an error, update UI
-    if (locationHookError) {
-      console.log("Location hook error:", locationHookError);
-      setIsGettingLocation(false);
-    }
-  }, [locationHookError]);
   
   // Debounced function for address autocomplete
   const fetchAddressSuggestions = useRef(
@@ -607,7 +535,247 @@ const LocationSelector = ({ currentUser }) => {
     };
   }, []);
   
-  // Handle address search input changes
+  // Function to create a standardized address from profile fields
+  const createAddressFromFields = (userData) => {
+    if (!userData.city || !userData.state) return null;
+    
+    return {
+      id: `primary-${Date.now()}`,
+      line1: userData.address || "",
+      city: userData.city,
+      state: userData.state,
+      zip: userData.zip || "",
+      isHome: true,
+      timestamp: new Date().toISOString()
+    };
+  };
+  
+  // Load user addresses on component mount
+  useEffect(() => {
+    const loadUserAddresses = async () => {
+      try {
+        console.log("Loading user addresses...");
+        // 1. Check user profile first if logged in
+        if (currentUser) {
+          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          const userData = userDoc.data() || {};
+          
+          console.log("User profile data:", userData);
+          
+          // Primary address gets highest priority - check it first
+          let foundPrimaryAddress = false;
+          
+          // Check for primaryAddress object
+          if (userData.primaryAddress && userData.primaryAddress.city && userData.primaryAddress.state) {
+            console.log("Found primary address object:", userData.primaryAddress);
+            setPrimaryAddress(userData.primaryAddress);
+            setCurrentLocation(userData.primaryAddress);
+            setHomeAddress(userData.primaryAddress);
+            setDisplayLocation(`${userData.primaryAddress.city}, ${userData.primaryAddress.state}`);
+            foundPrimaryAddress = true;
+            
+            // Save to localStorage
+            localStorage.setItem('userCity', userData.primaryAddress.city);
+            localStorage.setItem('userState', userData.primaryAddress.state);
+            localStorage.setItem('userZip', userData.primaryAddress.zip || '');
+            localStorage.setItem('userAddress', userData.primaryAddress.line1 || '');
+          } 
+          // If not, try to construct from individual fields
+          else if (userData.city && userData.state) {
+            console.log("Creating primary address from fields");
+            const constructedAddress = createAddressFromFields(userData);
+            
+            if (constructedAddress) {
+              setPrimaryAddress(constructedAddress);
+              setCurrentLocation(constructedAddress);
+              setHomeAddress(constructedAddress);
+              setDisplayLocation(`${constructedAddress.city}, ${constructedAddress.state}`);
+              foundPrimaryAddress = true;
+              
+              // Save this constructed address back to user profile
+              await updateDoc(doc(db, 'users', currentUser.uid), {
+                primaryAddress: constructedAddress
+              });
+              
+              // Save to localStorage
+              localStorage.setItem('userCity', constructedAddress.city);
+              localStorage.setItem('userState', constructedAddress.state);
+              localStorage.setItem('userZip', constructedAddress.zip || '');
+              localStorage.setItem('userAddress', constructedAddress.line1 || '');
+            }
+          }
+          
+          // Then check for most recently used location if we didn't find a primary address
+          // or if we have a lastUsedLocation that's different from primary
+          if (userData.lastUsedLocation && userData.lastUsedLocation.city && userData.lastUsedLocation.state) {
+            console.log("Found last used location:", userData.lastUsedLocation);
+            
+            if (!foundPrimaryAddress || 
+                (userData.primaryAddress && 
+                 (userData.lastUsedLocation.city !== userData.primaryAddress.city || 
+                  userData.lastUsedLocation.state !== userData.primaryAddress.state))) {
+              setCurrentLocation(userData.lastUsedLocation);
+              setHomeAddress(userData.lastUsedLocation);
+              setDisplayLocation(`${userData.lastUsedLocation.city}, ${userData.lastUsedLocation.state}`);
+              
+              // Save to localStorage
+              localStorage.setItem('userCity', userData.lastUsedLocation.city);
+              localStorage.setItem('userState', userData.lastUsedLocation.state);
+              localStorage.setItem('userZip', userData.lastUsedLocation.zip || '');
+              localStorage.setItem('userAddress', userData.lastUsedLocation.line1 || '');
+            }
+          }
+          
+          // Load recent locations (if any)
+          if (userData.recentLocations && Array.isArray(userData.recentLocations)) {
+            // Sort by timestamp and limit to 5
+            const sortedLocations = [...userData.recentLocations]
+              .filter(loc => loc && loc.city && loc.state) // Filter out invalid entries
+              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+              .slice(0, 5);
+            
+            console.log("Setting recent locations:", sortedLocations);
+            setRecentLocations(sortedLocations);
+          }
+          
+          return;
+        }
+        
+        // 2. Check localStorage if no user profile address
+        const storedCity = localStorage.getItem('userCity');
+        const storedState = localStorage.getItem('userState');
+        const storedZip = localStorage.getItem('userZip');
+        const storedAddress = localStorage.getItem('userAddress');
+        
+        if (storedCity && storedState) {
+          const currentAddr = {
+            id: 'current',
+            line1: storedAddress || `${storedCity}, ${storedState} ${storedZip || ''}`,
+            city: storedCity,
+            state: storedState,
+            zip: storedZip || '',
+            isHome: false,
+            timestamp: new Date().toISOString()
+          };
+          
+          setCurrentLocation(currentAddr);
+          setHomeAddress(currentAddr);
+          setDisplayLocation(`${storedCity}, ${storedState}`);
+        }
+      } catch (error) {
+        console.error("Error loading user addresses:", error);
+      }
+    };
+    
+    loadUserAddresses();
+  }, [currentUser]);
+  
+  // Update from geolocation if available
+  useEffect(() => {
+    if (userLocation) {
+      // Check if we specifically requested to use current location
+      const forceUseCurrentLocation = isGettingLocation;
+      
+      // Use browser location if no home address is set OR if we specifically requested current location
+      if (!homeAddress || forceUseCurrentLocation) {
+        const locationText = userLocation.city && userLocation.state
+          ? `${userLocation.city}, ${userLocation.state}`
+          : userLocation.zip || 'Location set';
+          
+        setDisplayLocation(locationText);
+        
+        // Create address from browser location
+        if (userLocation.city && userLocation.state) {
+          const newAddress = {
+            id: `loc-${Date.now()}`,
+            line1: userLocation.address || locationText,
+            city: userLocation.city,
+            state: userLocation.state,
+            zip: userLocation.zip || '',
+            lat: userLocation.latitude,
+            lon: userLocation.longitude,
+            isHome: false,
+            timestamp: new Date().toISOString()
+          };
+          
+          setCurrentLocation(newAddress);
+          setHomeAddress(newAddress);
+          
+          // Save to localStorage
+          localStorage.setItem('userCity', userLocation.city);
+          localStorage.setItem('userState', userLocation.state);
+          if (userLocation.zip) localStorage.setItem('userZip', userLocation.zip);
+          if (userLocation.address) localStorage.setItem('userAddress', userLocation.address);
+          
+          // Set flag to indicate location change
+          localStorage.setItem('kirova_location_changed', 'true');
+          
+          // Save to user profile if logged in
+          if (currentUser) {
+            // Create a separate function to handle async operations
+            const saveLocationToProfile = async () => {
+              try {
+                const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+                const userData = userDoc.data() || {};
+                
+                // Update recent locations
+                let updatedRecentLocations = userData.recentLocations || [];
+                
+                // Add current location if not already in the list
+                const isDuplicate = updatedRecentLocations.some(
+                  loc => loc.city === newAddress.city && loc.state === newAddress.state
+                );
+                
+                if (!isDuplicate) {
+                  updatedRecentLocations.unshift(newAddress);
+                  
+                  // Sort by timestamp and limit to 5
+                  updatedRecentLocations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                  updatedRecentLocations = updatedRecentLocations.slice(0, 5);
+                }
+                
+                // Update the user document with the new location and also update individual fields
+                await updateDoc(doc(db, 'users', currentUser.uid), {
+                  recentLocations: updatedRecentLocations,
+                  lastUsedLocation: newAddress,
+                  city: newAddress.city,
+                  state: newAddress.state,
+                  zip: newAddress.zip,
+                  address: newAddress.line1
+                });
+                
+                // Update local state
+                setRecentLocations(updatedRecentLocations);
+              } catch (error) {
+                console.error("Error saving location to profile:", error);
+              }
+            };
+            
+            // Call the async function
+            saveLocationToProfile();
+          }
+        }
+      }
+      
+      // Close location modal if it was getting location
+      if (isGettingLocation) {
+        setIsGettingLocation(false);
+        setTimeout(() => {
+          setIsLocationModalOpen(false);
+        }, 500);
+      }
+    }
+  }, [userLocation, homeAddress, currentUser, isGettingLocation]);
+  
+  useEffect(() => {
+    // If location hook returns an error, update UI
+    if (locationHookError) {
+      console.log("Location hook error:", locationHookError);
+      setIsGettingLocation(false);
+    }
+  }, [locationHookError]);
+  
+  // Handle address search input changes and trigger autocomplete
   const handleAddressInputChange = (e) => {
     const input = e.target.value;
     setAddressSearch(input);
@@ -628,6 +796,39 @@ const LocationSelector = ({ currentUser }) => {
     
     // Process and save this address
     saveSelectedAddress(suggestion);
+  };
+
+  const handleCartClick = (e) => {
+    if (!currentUser) {
+      e.preventDefault();
+      navigate('/signup', {
+        state: { message: "👋 Let's get you signed up to start building your cart and saving money!" }
+      });
+    }
+  };
+  
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      navigate('/');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+  
+  const openLocationModal = () => {
+    setIsLocationModalOpen(true);
+  };
+  
+  const closeLocationModal = () => {
+    setIsLocationModalOpen(false);
+    setAddressSearch('');
+    setShowAutocomplete(false);
+  };
+  
+  const handleCurrentLocation = () => {
+    setIsGettingLocation(true);
+    requestLocation();
   };
   
   const handleAddressSearch = (e) => {
@@ -767,11 +968,11 @@ const LocationSelector = ({ currentUser }) => {
     }
     
     // Close modal
-    closeModal();
+    closeLocationModal();
     
     // Force refresh only if we're on a page that needs location data
     const locationDependentPaths = ['/home', '/stores', '/compare'];
-    if (locationDependentPaths.some(path => locationPath.includes(path))) {
+    if (locationDependentPaths.some(path => locationPath.pathname.includes(path))) {
       window.location.reload();
     }
   };
@@ -838,11 +1039,11 @@ const LocationSelector = ({ currentUser }) => {
     }
     
     // Close modal
-    closeModal();
+    closeLocationModal();
     
     // Force refresh only if we're on a page that needs location data
     const locationDependentPaths = ['/home', '/stores', '/compare'];
-    if (locationDependentPaths.some(path => locationPath.includes(path))) {
+    if (locationDependentPaths.some(path => locationPath.pathname.includes(path))) {
       window.location.reload();
     }
   };
@@ -884,52 +1085,93 @@ const LocationSelector = ({ currentUser }) => {
       setPrimaryAddress(primaryLocation);
       
       // Close modal
-      closeModal();
+      closeLocationModal();
     } catch (error) {
       console.error("Error setting primary address:", error);
       toast.error("Failed to update primary address");
     }
   };
-  
-  const openModal = () => {
-    setIsModalOpen(true);
-  };
-  
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setAddressSearch('');
-    setShowAutocomplete(false);
-  };
-  
-  const handleCurrentLocation = () => {
-    setIsGettingLocation(true);
-    requestLocation();
-  };
-  
+
+  // Choose destination based on authentication status
+  const logoDestination = currentUser ? '/home' : '/';
+  const cartDestination = currentUser ? "/cart" : "#";
+
   return (
-    <>
-      <LocationButton onClick={openModal}>
-        <LocationIcon>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-            <circle cx="12" cy="10" r="3"></circle>
-          </svg>
-        </LocationIcon>
-        <LocationText>
-          {currentLocation?.city && currentLocation?.state 
-            ? `${currentLocation.city}, ${currentLocation.state}`
-            : displayLocation || "Set location"}
-        </LocationText>
-      </LocationButton>
+    <NavContainer>
+      <NavContent>
+        <LogoText to={logoDestination}>Kirova</LogoText>
+
+        <SearchContainer>
+          <SearchIcon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </SearchIcon>
+          <form onSubmit={handleSearch}>
+            <SearchInput 
+              placeholder="Search products, stores, and deals" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearch(e);
+                }
+              }}
+            />
+          </form>
+        </SearchContainer>
+
+        <NavRight>
+          <LocationSelector onClick={openLocationModal}>
+            <LocationIcon>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </LocationIcon>
+            <LocationText>
+              {currentLocation?.city && currentLocation?.state 
+                ? `${currentLocation.city}, ${currentLocation.state}`
+                : displayLocation || "Set location"}
+            </LocationText>
+          </LocationSelector>
+
+          <NavLinks isOpen={isMenuOpen}>
+            {!currentUser ? (
+              <Button onClick={() => navigate('/login')} variant="outline">Log In</Button>
+            ) : (
+              <Button onClick={handleLogout} variant="outline">Log Out</Button>
+            )}
+          </NavLinks>
+
+          <CartButton to={cartDestination} onClick={handleCartClick}>
+            <CartIcon>
+              <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="10" r="5" fill="#2F8A11" />
+                <rect x="10" y="15" width="4" height="23" rx="2" fill="#2F8A11" />
+                <path d="M12 22 L24 12" stroke="#2F8A11" strokeWidth="4" strokeLinecap="round" />
+                <path d="M12 22 L24 35" stroke="#2F8A11" strokeWidth="4" strokeLinecap="round" />
+                <path d="M35 35 L55 35 L52 20 L38 20 Z" fill="none" stroke="#2F8A11" strokeWidth="2.5" />
+                <path d="M38 20 L35 14 L32 14" stroke="#2F8A11" strokeWidth="2.5" strokeLinecap="round" />
+                <circle cx="42" cy="40" r="2.5" fill="none" stroke="#2F8A11" strokeWidth="1.5" />
+                <circle cx="52" cy="40" r="2.5" fill="none" stroke="#2F8A11" strokeWidth="1.5" />
+              </svg>
+            </CartIcon>
+            {cartCount > 0 && currentUser && <CartCount>{cartCount}</CartCount>}
+          </CartButton>
+        </NavRight>
+      </NavContent>
       
-      <Modal isOpen={isModalOpen}>
-        <ModalContent>
-          <CloseButton onClick={closeModal}>×</CloseButton>
+      {/* Location Modal with Autocomplete */}
+      <LocationModal isOpen={isLocationModalOpen}>
+        <LocationModalContent>
+          <CloseButton onClick={closeLocationModal}>×</CloseButton>
           <ModalTitle>Choose address</ModalTitle>
           
           <form onSubmit={handleAddressSearch}>
             <SearchBar ref={autocompleteRef}>
-              <SearchInput 
+              <SearchInputField 
                 type="text" 
                 placeholder="Add a new address" 
                 value={addressSearch}
@@ -1000,7 +1242,7 @@ const LocationSelector = ({ currentUser }) => {
             onClick={handleCurrentLocation}
             active={isGettingLocation}
           >
-            <AddressIcon>
+            <LocationPin>
               {isGettingLocation ? (
                 <LoadingSpinner />
               ) : (
@@ -1009,7 +1251,7 @@ const LocationSelector = ({ currentUser }) => {
                   <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
                 </svg>
               )}
-            </AddressIcon>
+            </LocationPin>
             <AddressInfo>
               <AddressLine>
                 {isGettingLocation ? 'Getting your location...' : 'Use current location'}
@@ -1022,8 +1264,8 @@ const LocationSelector = ({ currentUser }) => {
             </AddressInfo>
           </CurrentLocationButton>
           
-          {/* Recent Locations - Only show for logged in user */}
-          {currentUser && recentLocations.length > 0 && (
+          {/* Recent Locations */}
+          {recentLocations.length > 0 && (
             <>
               <SectionTitle>Recent locations</SectionTitle>
               {recentLocations.map(location => (
@@ -1059,10 +1301,10 @@ const LocationSelector = ({ currentUser }) => {
               ))}
             </>
           )}
-        </ModalContent>
-      </Modal>
-    </>
+        </LocationModalContent>
+      </LocationModal>
+    </NavContainer>
   );
 };
 
-export default LocationSelector;
+export default Navbar;

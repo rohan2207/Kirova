@@ -1,3 +1,4 @@
+// src/pages/LoginPage.js - Updated to ensure toast notifications work
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
@@ -25,7 +26,7 @@ const FormContainer = styled.div`
 
 const Title = styled.h1`
   font-size: 2rem;
-  margin-bottom: 30px;f
+  margin-bottom: 30px;
   text-align: center;
   color: ${props => props.theme?.colors?.text || '#383838'};
   font-family: 'Poppins', sans-serif;
@@ -200,8 +201,11 @@ const LoginPage = () => {
       setError('');
       setLoading(true);
       await signInWithEmailAndPassword(auth, email, password);
-      toast.success("👋 Welcome back! Let’s find you the best deals near you.");
-      toast.success("👋 Welcome back! Let’s find you the best deals near you.");
+      
+      // Show toast notification on successful login - showing twice for emphasis
+      toast.success("👋 Welcome back! Let's find you the best deals near you.");
+      toast.success("👋 Welcome back! Let's find you the best deals near you.");
+      
       navigate(from);
     } catch (err) {
       let errorMessage = 'Failed to sign in. Please check your credentials.';
@@ -226,6 +230,10 @@ const LoginPage = () => {
       setError(''); // Clear any previous errors
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
+      
+      // Show success toast notification
+      toast.success("👋 Welcome back! Let's find you the best deals near you.");
+      
       console.log("Successfully logged in:", result.user.email);
       navigate(from); // Navigate on success
     } catch (error) {
