@@ -2,7 +2,7 @@ import React from 'react';
 import styled from 'styled-components';
 import Hero from '../components/home/Hero';
 import Features from '../components/home/Features';
-import MapSection from '../components/home/MapSection';
+//import MapSection from '../components/home/MapSection';
 import MerchantsSection from '../components/home/MerchantsSection';
 
 const PageContainer = styled.div`

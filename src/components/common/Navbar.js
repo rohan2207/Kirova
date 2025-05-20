@@ -421,7 +421,7 @@ const Navbar = () => {
   const { currentUser, signOut } = useAuth();
   const navigate = useNavigate();
   const locationPath = useLocation();
-  const [cartCount, setCartCount] = useState(currentUser ? 3 : 0);
+  const [cartCount] = useState(currentUser ? 3 : 0);
   const autocompleteRef = useRef(null);
   
   // Use the location hook to get user's location
