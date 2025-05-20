@@ -5,6 +5,9 @@ import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useAuth } from '../context/AuthContext';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
 
 const Container = styled.div`
   padding: 80px 40px;
@@ -184,6 +187,7 @@ const searchAllApis = async (query) => {
 };
 
 const SearchResults = () => {
+  const { currentUser } = useAuth(); // Get current user from auth context
   const [searchParams] = useSearchParams();
   const query = searchParams.get('q') || '';
   
@@ -191,11 +195,33 @@ const SearchResults = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
+  // Save cart to Firebase for persistence
+  const saveCartToFirebase = async (cart) => {
+    try {
+      if (!currentUser) return;
+      
+      const cartRef = doc(db, 'carts', currentUser.uid);
+      await setDoc(cartRef, {
+        userId: currentUser.uid,
+        items: cart,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      console.log("Cart saved to Firebase:", cart.length, "items");
+    } catch (error) {
+      console.error("Error saving cart to Firebase:", error);
+    }
+  };
+  
   // Function to add a product to the shopping list
   const addToList = (product) => {
     try {
       // Get existing shopping list from localStorage (using the key 'shoppingCart' to match CartIcon)
       const existingCart = JSON.parse(localStorage.getItem('shoppingCart')) || [];
+      
+      // Set cart owner - either user ID or 'guest'
+      const cartOwner = currentUser ? currentUser.uid : 'guest';
+      localStorage.setItem('cartOwner', cartOwner);
       
       // Check if product already exists in list
       const existingItemIndex = existingCart.findIndex(item => 
@@ -225,10 +251,10 @@ const SearchResults = () => {
       // Dispatch a custom event to notify other components (like CartIcon) that cart has changed
       window.dispatchEvent(new Event('cartUpdated'));
       
-      // For logged in users, also save to database (will implement later)
-      // if (currentUser) {
-      //   saveListToFirebase(existingCart);
-      // }
+      // For logged in users, save to database
+      if (currentUser) {
+        saveCartToFirebase(existingCart);
+      }
     } catch (error) {
       console.error('Error adding product to list:', error);
       toast.error('Failed to add product to your list');

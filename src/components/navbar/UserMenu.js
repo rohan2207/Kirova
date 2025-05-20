@@ -3,6 +3,7 @@ import React from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import Button from '../common/Button';
+import { handleLogout } from '../../services/authService';
 
 const NavLinks = styled.div`
   display: flex;
@@ -23,16 +24,12 @@ const NavLinks = styled.div`
   }
 `;
 
-const UserMenu = ({ currentUser, signOut, isMenuOpen }) => {
+const UserMenu = ({ currentUser, isMenuOpen }) => {
   const navigate = useNavigate();
   
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      navigate('/');
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
+  const onLogout = async () => {
+    // Use the reusable logout handler and pass the navigate function
+    await handleLogout(navigate);
   };
   
   return (
@@ -40,7 +37,7 @@ const UserMenu = ({ currentUser, signOut, isMenuOpen }) => {
       {!currentUser ? (
         <Button onClick={() => navigate('/login')} variant="outline">Log In</Button>
       ) : (
-        <Button onClick={handleLogout} variant="outline">Log Out</Button>
+        <Button onClick={onLogout} variant="outline">Log Out</Button>
       )}
     </NavLinks>
   );

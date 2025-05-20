@@ -1,9 +1,10 @@
-// src/pages/LoginPage.js - Updated to ensure toast notifications work
+// src/pages/LoginPage.js
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { auth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from '../services/firebase';
+import { handleLoginSuccess } from '../services/authService';
 
 const PageContainer = styled.div`
   display: flex;
@@ -200,13 +201,8 @@ const LoginPage = () => {
     try {
       setError('');
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email, password);
-      
-      // Show toast notification on successful login - showing twice for emphasis
-      toast.success("👋 Welcome back! Let's find you the best deals near you.");
-      toast.success("👋 Welcome back! Let's find you the best deals near you.");
-      
-      navigate(from);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      await handleLoginSuccess(result.user, navigate, from);
     } catch (err) {
       let errorMessage = 'Failed to sign in. Please check your credentials.';
       
@@ -230,12 +226,7 @@ const LoginPage = () => {
       setError(''); // Clear any previous errors
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      
-      // Show success toast notification
-      toast.success("👋 Welcome back! Let's find you the best deals near you.");
-      
-      console.log("Successfully logged in:", result.user.email);
-      navigate(from); // Navigate on success
+      await handleLoginSuccess(result.user, navigate, from);
     } catch (error) {
       console.error("Google Sign-in Error:", error.code, error.message);
       setError('Google sign-in failed: ' + error.message);

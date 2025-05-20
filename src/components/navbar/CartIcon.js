@@ -1,8 +1,10 @@
-// src/components/navbar/CartIcon.js - With count from localStorage
+// src/components/navbar/CartIcon.js
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 const CartButton = styled(Link)`
   position: relative;
@@ -49,13 +51,35 @@ const CartIconComponent = ({ currentUser }) => {
   const navigate = useNavigate();
   const [cartCount, setCartCount] = useState(0);
   
-  // Update cart count from localStorage
+  // Save cart to Firebase for persistence
+  const saveCartToFirebase = async (cart) => {
+    try {
+      if (!currentUser) return;
+      
+      const cartRef = doc(db, 'carts', currentUser.uid);
+      await setDoc(cartRef, {
+        userId: currentUser.uid,
+        items: cart,
+        lastUpdated: new Date().toISOString()
+      });
+      console.log("Cart saved to Firebase:", cart.length, "items");
+    } catch (error) {
+      console.error("Error saving cart to Firebase:", error);
+    }
+  };
+  
+  // Update cart count from localStorage and sync with Firebase if needed
   const updateCartCount = () => {
     try {
       const cart = JSON.parse(localStorage.getItem('shoppingCart')) || [];
       // Calculate total items (sum of quantities)
       const count = cart.reduce((total, item) => total + (item.quantity || 1), 0);
       setCartCount(count);
+      
+      // If user is logged in and cart has items, save to Firebase
+      if (currentUser && cart.length > 0) {
+        saveCartToFirebase(cart);
+      }
     } catch (error) {
       console.error('Error reading cart from localStorage:', error);
       setCartCount(0);
@@ -64,7 +88,31 @@ const CartIconComponent = ({ currentUser }) => {
   
   // Initialize cart count and listen for updates
   useEffect(() => {
-    // Initial update
+    // Function to check and clear cart if needed
+    const handleUserChange = () => {
+      // If user is not logged in, ensure we're not showing previous user's cart
+      if (!currentUser) {
+        // Get the cart owner from localStorage
+        const cartOwner = localStorage.getItem('cartOwner');
+        
+        // If cart exists but belongs to a previous user (or no cartOwner is set), clear it
+        if (localStorage.getItem('shoppingCart') && (!cartOwner || cartOwner !== 'guest')) {
+          localStorage.removeItem('shoppingCart');
+          localStorage.setItem('cartOwner', 'guest');
+          setCartCount(0);
+          // Dispatch event to notify other components
+          window.dispatchEvent(new Event('cartUpdated'));
+        }
+      } else {
+        // Set cart owner to current user ID
+        localStorage.setItem('cartOwner', currentUser.uid);
+      }
+    };
+    
+    // Run on component mount and when currentUser changes
+    handleUserChange();
+    
+    // Update cart count
     updateCartCount();
     
     // Listen for cart updates
@@ -72,14 +120,13 @@ const CartIconComponent = ({ currentUser }) => {
       updateCartCount();
     };
     
-    // Add event listener
     window.addEventListener('cartUpdated', handleCartUpdate);
     
     // Clean up
     return () => {
       window.removeEventListener('cartUpdated', handleCartUpdate);
     };
-  }, []);
+  }, [currentUser]); // Add currentUser as dependency
   
   // Choose destination based on authentication status
   const cartDestination = currentUser ? "/cart" : "#";
